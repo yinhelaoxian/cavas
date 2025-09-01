@@ -1,0 +1,22 @@
+<view class="page">
+  <view class="canvas-wrap">
+    <!-- type="2d" 表示新版 Canvas 2D API；同时保留 canvas-id 以便回退使用 wx.canvasToTempFilePath -->
+    <canvas type="2d" id="editor" canvas-id="editor" class="editor" disable-scroll="true"
+      bindtouchstart="onTouchStart"
+      bindtouchmove="onTouchMove"
+      bindtouchend="onTouchEnd"
+      bindtouchcancel="onTouchEnd"
+    ></canvas>
+  </view>
+
+  <view class="toolbar">
+    <button class="btn" type="primary" bindtap="chooseImage">选择图片</button>
+    <button class="btn" bindtap="resetView">重置视图</button>
+    <button class="btn" type="warn" bindtap="exportCrop">导出剪裁</button>
+  </view>
+
+  <view wx:if="{{outputPath}}" class="preview">
+    <text>导出结果：</text>
+    <image mode="widthFix" src="{{outputPath}}" class="preview-img" />
+  </view>
+</view>

@@ -1,0 +1,25 @@
+.page { 
+  padding: 16rpx; 
+}
+.canvas-wrap { 
+  position: relative; 
+}
+.editor { 
+  width: 100%; 
+  height: 70vh; 
+  background: #111; 
+  border-radius: 16rpx; 
+}
+.toolbar { 
+  margin-top: 16rpx; 
+  display: grid; 
+  grid-template-columns: 1fr 1fr 1fr; 
+  gap: 12rpx; 
+}
+.preview { 
+  margin-top: 16rpx; 
+}
+.preview-img { 
+  width: 100%; 
+  border-radius: 16rpx; 
+}
