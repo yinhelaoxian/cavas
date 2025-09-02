@@ -1,22 +1,49 @@
-<view class="page">
-  <view class="canvas-wrap">
-    <!-- type="2d" 表示新版 Canvas 2D API；同时保留 canvas-id 以便回退使用 wx.canvasToTempFilePath -->
-    <canvas type="2d" id="editor" canvas-id="editor" class="editor" disable-scroll="true"
+<!-- pages/index/index.wxml -->
+<view class="container">
+  <!-- 主画布容器 -->
+  <view class="canvas-container">
+    <canvas 
+      canvas-id="imageCanvas" 
+      class="image-canvas"
+      style="width: {{canvasWidth}}px; height: {{canvasHeight}}px;"
       bindtouchstart="onTouchStart"
       bindtouchmove="onTouchMove"
       bindtouchend="onTouchEnd"
-      bindtouchcancel="onTouchEnd"
-    ></canvas>
+      disable-scroll="true">
+    </canvas>
+    
+    <!-- 隐藏的、用于导出的临时画布 -->
+    <canvas 
+      canvas-id="tempCanvas" 
+      class="temp-canvas"
+      style="width: {{cropBox.width}}px; height: {{cropBox.height}}px;">
+    </canvas>
   </view>
-
-  <view class="toolbar">
-    <button class="btn" type="primary" bindtap="chooseImage">选择图片</button>
-    <button class="btn" bindtap="resetView">重置视图</button>
-    <button class="btn" type="warn" bindtap="exportCrop">导出剪裁</button>
+  
+  <!-- 控制按钮区域 -->
+  <view class="controls">
+    <button class="control-btn" bindtap="chooseImage">
+      选择图片
+    </button>
+    <button class="control-btn" bindtap="rotateImage" disabled="{{!imageLoaded}}">
+      旋转图片
+    </button>
+    <button class="control-btn primary" bindtap="exportCroppedImage" disabled="{{!imageLoaded}}">
+      导出裁剪区域
+    </button>
   </view>
-
-  <view wx:if="{{outputPath}}" class="preview">
-    <text>导出结果：</text>
-    <image mode="widthFix" src="{{outputPath}}" class="preview-img" />
+  
+  <!-- 操作提示 -->
+  <view class="tips" wx:if="{{!imageLoaded}}">
+    <text class="tips-text">请选择一张图片开始裁剪</text>
+  </view>
+  
+  <view class="tips" wx:else>
+    <text class="tips-text">
+      • 单指拖动可移动图片
+      • 双指捏合可缩放图片  
+      • 拖动绿色圆点调整裁剪框
+      • 拖动裁剪框内部可移动位置
+    </text>
   </view>
 </view>
