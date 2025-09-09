@@ -1,5 +1,7 @@
-// image-behavior.js 代码
+// image-behavior.js
+// 微信小程序 Behavior：处理图片加载、移动、缩放、旋转
 module.exports = Behavior({
+  // 内部数据
   data: {
     ctx2d: null,           // Canvas 2D 上下文
     canvasNode: null,      // Canvas 节点
@@ -9,13 +11,18 @@ module.exports = Behavior({
     imageY: 0,             // 图片中心点 Y 坐标（逻辑像素）
     imageScale: 1,         // 图片缩放比例
     imageRotation: 0,      // 图片旋转角度（度）
-
-    // 触摸状态
     touchStartData: null,  // 触摸开始时的坐标数组
     lastTouchData: null,   // 上一次触摸坐标数组
     isDraggingImage: false,// 是否正在拖动图片
     isScaling: false,      // 是否正在缩放图片
-    isMoving: false        // 防止绘制重入
+    isMoving: false,       // 防止绘制重入
+    rotatedSizeCache: null,// 缓存旋转后边界计算结果
+    consts: {              // 常量定义
+      MAX_SCALE: 5,        // 最大缩放比例
+      MIN_SCALE_FACTOR: 0.5, // 最小缩放因子
+      TOUCH_THRESHOLD: 1,  // 触摸移动阈值（px）
+      ROTATE_STEP: 90      // 旋转步进角度（度）
+    }
   },
 
   methods: {
@@ -81,17 +88,26 @@ module.exports = Behavior({
             src: imagePath,
             success: (imageInfo) => {
               const imageObj = canvasNode.createImage();
+              // 加载超时处理
+              const loadTimeout = setTimeout(() => {
+                console.error('[图片行为] 图片加载超时');
+                wx.showToast({ title: '图片加载超时', icon: 'none' });
+              }, 5000);
+
               imageObj.onload = () => {
+                clearTimeout(loadTimeout);
                 this.setData({
                   imageInfo,
                   imageObj,
                   imageRotation: 0
                 }, () => {
+                  this.data.rotatedSizeCache = null; // 失效边界缓存
                   this._centerImage();
                   this.throttledDraw && this.throttledDraw();
                 });
               };
               imageObj.onerror = (err) => {
+                clearTimeout(loadTimeout);
                 console.error('[图片行为] 图片加载失败:', err);
                 wx.showToast({ title: '图片加载失败', icon: 'none' });
               };
@@ -105,7 +121,7 @@ module.exports = Behavior({
         },
         fail: (err) => {
           console.error('[图片行为] 选择图片失败:', err);
-          wx.showToast({ title: '选择图片失败', icon: 'none' }); // ✅ 统一错误处理
+          wx.showToast({ title: '选择图片失败', icon: 'none' });
         }
       });
     },
@@ -114,10 +130,10 @@ module.exports = Behavior({
      * 将图片居中显示在画布内
      */
     _centerImage() {
-      const { imageObj, canvasWidth, canvasHeight } = this.data;
+      const { imageObj, canvasWidth, canvasHeight, imagePadding } = this.data;
       if (!imageObj || !canvasWidth || !canvasHeight) return;
 
-      const padding = 40; // ✅ 可优化：作为属性配置
+      const padding = imagePadding;
       const availableWidth = canvasWidth - padding;
       const availableHeight = canvasHeight - padding;
 
@@ -133,16 +149,15 @@ module.exports = Behavior({
         imageY: imageY,
         imageScale: scale
       });
+      this.data.rotatedSizeCache = null; // 失效边界缓存
     },
 
     /**
-     * 获取触摸逻辑坐标（CanvasTouch 专用）
-     * @param {Object} touch CanvasTouch 对象
+     * 将触摸坐标转换为逻辑坐标
+     * @param {Object} touch 触摸对象
      * @returns {Object} {x, y} 逻辑坐标
      */
     _getLogicalTouch(touch) {
-      // ✅ 关键修复：使用 touch.x/y，直接是相对于 Canvas 的逻辑坐标，无需 dpr 或位置减法
-      // 官方：CanvasTouch.x/y 已匹配 ctx.scale(dpr, dpr) 的逻辑系
       return {
         x: touch.x,
         y: touch.y
@@ -151,6 +166,7 @@ module.exports = Behavior({
 
     /**
      * 图片触摸开始
+     * @param {Object} e 触摸事件对象
      */
     _onImageTouchStart(e) {
       const { touches } = e;
@@ -158,27 +174,21 @@ module.exports = Behavior({
 
       const logicalTouches = touches.map(touch => this._getLogicalTouch(touch));
 
-      // 保存触摸状态
-      this.setData({
-        touchStartData: logicalTouches,
-        lastTouchData: logicalTouches
-      });
-
+      // 直接修改临时状态，避免 setData 异步延迟
+      this.data.touchStartData = logicalTouches;
+      this.data.lastTouchData = logicalTouches;
       if (touches.length === 1) {
-        this.setData({
-          isDraggingImage: true,
-          isScaling: false
-        });
+        this.data.isDraggingImage = true;
+        this.data.isScaling = false;
       } else if (touches.length === 2) {
-        this.setData({
-          isScaling: true,
-          isDraggingImage: false
-        });
+        this.data.isScaling = true;
+        this.data.isDraggingImage = false;
       }
     },
 
     /**
      * 图片触摸移动
+     * @param {Object} e 触摸事件对象
      */
     _onImageTouchMove(e) {
       const { touches } = e;
@@ -192,17 +202,17 @@ module.exports = Behavior({
         const dx = currentLogicalTouches[0].x - lastTouchData[0].x;
         const dy = currentLogicalTouches[0].y - lastTouchData[0].y;
         
-        // ✅ 防抖动：忽略小移动（阈值 1px）
-        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+        // 防抖动：忽略小移动
+        if (Math.abs(dx) < this.data.consts.TOUCH_THRESHOLD && Math.abs(dy) < this.data.consts.TOUCH_THRESHOLD) return;
         
         this.data.imageX = imageX + dx;
         this.data.imageY = imageY + dy;
         this.data.lastTouchData = currentLogicalTouches;
 
-        // ✅ 边界检查
+        // 边界检查
         this._clampImagePosition();
 
-        // ✅ 立即绘制
+        // 立即绘制
         if (!this.data.isMoving) {
           this.data.isMoving = true;
           wx.nextTick(() => {
@@ -223,12 +233,12 @@ module.exports = Behavior({
         if (lastDistance > 0) {
           const scaleRatio = currentDistance / lastDistance;
           let newScale = imageScale * scaleRatio;
-          // ✅ 动态 minScale，避免过小
-          const minScale = Math.min(this.data.canvasWidth / this.data.imageObj.width, this.data.canvasHeight / this.data.imageObj.height) * 0.5;
-          newScale = Math.max(minScale, Math.min(newScale, 5));
+          const minScale = Math.min(this.data.canvasWidth / this.data.imageObj.width, this.data.canvasHeight / this.data.imageObj.height) * this.data.consts.MIN_SCALE_FACTOR;
+          newScale = Math.max(minScale, Math.min(newScale, this.data.consts.MAX_SCALE));
 
           this.data.imageScale = newScale;
           this.data.lastTouchData = currentLogicalTouches;
+          this.data.rotatedSizeCache = null; // 失效缓存
 
           if (!this.data.isMoving) {
             this.data.isMoving = true;
@@ -248,30 +258,47 @@ module.exports = Behavior({
       const { imageObj, imageScale, imageRotation, canvasWidth, canvasHeight, boundaryPadding } = this.data;
       if (!imageObj) return;
 
-      // ✅ 优化：计算旋转后 bounding box half size
+      // 缓存旋转计算结果
+      const cacheKey = `${imageRotation}-${imageScale}-${imageObj.width}-${imageObj.height}`;
+      if (this.data.rotatedSizeCache && this.data.rotatedSizeCache.key === cacheKey) {
+        const { halfWidth, halfHeight } = this.data.rotatedSizeCache;
+        this.data.imageX = Math.max(halfWidth, Math.min(this.data.imageX, canvasWidth - halfWidth));
+        this.data.imageY = Math.max(halfHeight, Math.min(this.data.imageY, canvasHeight - halfHeight));
+        return;
+      }
+
       const rad = (imageRotation * Math.PI) / 180;
       const cos = Math.abs(Math.cos(rad));
       const sin = Math.abs(Math.sin(rad));
       const halfWidth = (imageObj.width * imageScale / 2 * cos) + (imageObj.height * imageScale / 2 * sin) + boundaryPadding;
       const halfHeight = (imageObj.width * imageScale / 2 * sin) + (imageObj.height * imageScale / 2 * cos) + boundaryPadding;
 
-      // 确保图片边缘不超过画布（可配置 padding）
       this.data.imageX = Math.max(halfWidth, Math.min(this.data.imageX, canvasWidth - halfWidth));
       this.data.imageY = Math.max(halfHeight, Math.min(this.data.imageY, canvasHeight - halfHeight));
+
+      this.data.rotatedSizeCache = {
+        key: cacheKey,
+        halfWidth,
+        halfHeight
+      };
     },
 
     /**
      * 图片触摸结束（同步最终状态）
      */
     _onImageTouchEnd() {
-      // ✅ 优化：仅 setData 必要字段，减少开销
+      // 直接清零临时状态
+      this.data.isDraggingImage = false;
+      this.data.isScaling = false;
+      this.data.touchStartData = null;
+      this.data.lastTouchData = null;
+
       this.setData({
         isDraggingImage: false,
         isScaling: false,
         touchStartData: null,
         lastTouchData: null
       });
-      // imageX/Y/Scale 已直接修改，无需重复 set
     },
 
     /**
@@ -283,8 +310,10 @@ module.exports = Behavior({
         return;
       }
       this.setData({
-        imageRotation: (this.data.imageRotation + 90) % 360
+        imageRotation: (this.data.imageRotation + this.data.consts.ROTATE_STEP) % 360
       }, () => {
+        this.data.rotatedSizeCache = null; // 失效缓存
+        this._clampImagePosition(); // 旋转后检查边界
         this.throttledDraw && this.throttledDraw();
       });
     },
@@ -299,6 +328,7 @@ module.exports = Behavior({
       }
       this._centerImage();
       this.setData({ imageRotation: 0 }, () => {
+        this.data.rotatedSizeCache = null; // 失效缓存
         this.throttledDraw && this.throttledDraw();
       });
     }

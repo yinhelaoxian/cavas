@@ -1,13 +1,14 @@
+<!-- image-cropper.wxml -->
 <view class="cropper-container">
   <canvas
     type="2d"
     id="cropperCanvas"
     class="cropper-canvas"
     style="width: {{width}}px; height: {{height}}px;"
-    bindtouchstart="_onTouchStart"
-    bindtouchmove="_onTouchMove"
-    bindtouchend="_onTouchEnd"
-    bindtouchcancel="_onTouchEnd"
+    catchtouchstart="_onTouchStart"  
+    catchtouchmove="_onTouchMove"
+    catchtouchend="_onTouchEnd"
+    catchtouchcancel="_onTouchEnd"
   />
   
   <!-- 模式切换按钮 -->
