@@ -1,4 +1,6 @@
 {
-  "navigationBarTitleText": "cavas",
-  "usingComponents": {}
+  "navigationBarTitleText": "Canvas 2D 组件测试",
+  "usingComponents": {
+    "image-cropper": "/components/image-cropper/image-cropper" 
+  }
 }

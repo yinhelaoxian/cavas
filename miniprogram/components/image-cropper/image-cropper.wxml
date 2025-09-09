@@ -1,0 +1,32 @@
+<view class="cropper-container">
+  <canvas
+    type="2d"
+    id="cropperCanvas"
+    class="cropper-canvas"
+    style="width: {{width}}px; height: {{height}}px;"
+    bindtouchstart="_onTouchStart"
+    bindtouchmove="_onTouchMove"
+    bindtouchend="_onTouchEnd"
+    bindtouchcancel="_onTouchEnd"
+  />
+  
+  <!-- 模式切换按钮 -->
+  <view class="mode-switch">
+    <button 
+      class="mode-btn {{mode === 'image' ? 'active' : ''}}"
+      bindtap="switchMode"
+      data-mode="image"
+      size="mini"
+    >
+      编辑图片
+    </button>
+    <button 
+      class="mode-btn {{mode === 'crop' ? 'active' : ''}}"
+      bindtap="switchMode"
+      data-mode="crop"
+      size="mini"
+    >
+      剪裁模式
+    </button>
+  </view>
+</view>

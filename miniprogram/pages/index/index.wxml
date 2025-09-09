@@ -1,49 +1,22 @@
-<!-- pages/index/index.wxml -->
-<view class="container">
-  <!-- 主画布容器 -->
-  <view class="canvas-container">
-    <canvas 
-      canvas-id="imageCanvas" 
-      class="image-canvas"
-      style="width: {{canvasWidth}}px; height: {{canvasHeight}}px;"
-      bindtouchstart="onTouchStart"
-      bindtouchmove="onTouchMove"
-      bindtouchend="onTouchEnd"
-      disable-scroll="true">
-    </canvas>
-    
-    <!-- 隐藏的、用于导出的临时画布 -->
-    <canvas 
-      canvas-id="tempCanvas" 
-      class="temp-canvas"
-      style="width: {{cropBox.width}}px; height: {{cropBox.height}}px;">
-    </canvas>
-  </view>
-  
-  <!-- 控制按钮区域 -->
-  <view class="controls">
-    <button class="control-btn" bindtap="chooseImage">
-      选择图片
-    </button>
-    <button class="control-btn" bindtap="rotateImage" disabled="{{!imageLoaded}}">
-      旋转图片
-    </button>
-    <button class="control-btn primary" bindtap="exportCroppedImage" disabled="{{!imageLoaded}}">
-      导出裁剪区域
-    </button>
-  </view>
-  
-  <!-- 操作提示 -->
-  <view class="tips" wx:if="{{!imageLoaded}}">
-    <text class="tips-text">请选择一张图片开始裁剪</text>
-  </view>
-  
-  <view class="tips" wx:else>
-    <text class="tips-text">
-      • 单指拖动可移动图片
-      • 双指捏合可缩放图片  
-      • 拖动绿色圆点调整裁剪框
-      • 拖动裁剪框内部可移动位置
-    </text>
-  </view>
+<!-- index.wxml -->
+<view class="page-container">
+  <image-cropper
+    id="cropperComp"
+    width="{{350}}"
+    height="{{350}}"
+    bind:ready="onCropperReady"
+  />
+
+  <button bindtap="chooseImage" style="margin-top: 20px; width: 100%;" disabled="{{!cropperReady}}">
+    选择图片（就绪: {{cropperReady ? '是' : '否'}}）
+  </button>
+  <button bindtap="rotateImage" style="margin-top: 10px; width: 100%;" disabled="{{!cropperReady}}">
+    旋转图片
+  </button>
+  <button bindtap="saveImage" style="margin-top: 10px; width: 100%;" disabled="{{!cropperReady}}">
+    保存剪裁图片
+  </button>
+  <button bindtap="resetImage" style="margin-top: 10px; width: 100%;" disabled="{{!cropperReady}}">
+    重置位置
+  </button>
 </view>

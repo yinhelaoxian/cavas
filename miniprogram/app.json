@@ -4,8 +4,8 @@
   ],
   "window": {
     "backgroundTextStyle": "light",
-    "navigationBarBackgroundColor": "#ffffff",
-    "navigationBarTitleText": "图片剪裁",
+    "navigationBarBackgroundColor": "#fff",
+    "navigationBarTitleText": "图片处理",
     "navigationBarTextStyle": "black"
   }
 }
