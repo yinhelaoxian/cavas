@@ -22,7 +22,8 @@ Component({
     isReady: false,      // 画布是否初始化完成
     dpr: 1,              // 设备像素比（仅用于 Canvas 初始化）
     canvasWidth: 0,      // 画布实际渲染宽度（CSS 像素）
-    canvasHeight: 0      // 画布实际渲染高度（CSS 像素）
+    canvasHeight: 0,     // 画布实际渲染高度（CSS 像素）
+    canvasRect: null     // Canvas 位置信息（用于触摸坐标转换）
   },
 
   // 生命周期函数
@@ -58,7 +59,7 @@ Component({
       wx.createSelectorQuery()
         .in(this)
         .select('#cropperCanvas')
-        .fields({ node: true, size: true })
+        .fields({ node: true, size: true, rect: true })
         .exec((res) => {
           if (!res[0] || !res[0].node) {
             console.error('[组件] Canvas 2D 节点查询失败');
@@ -82,9 +83,10 @@ Component({
             dpr,
             canvasWidth: renderWidth,
             canvasHeight: renderHeight,
-            isReady: true
+            canvasRect: res[0].rect || { left: 0, top: 0, width: renderWidth, height: renderHeight } // 补充容错
           }, () => {
-            console.log('[组件] Canvas 2D 初始化成功');
+            console.log('[组件] Canvas 2D 初始化成功:', { width: renderWidth, height: renderHeight, dpr });
+            console.log('[Canvas Rect] 实际值:', res[0].rect, '使用值:', this.data.canvasRect); // 补充日志
             this._initDrawFunction();
             this.triggerEvent('ready', { status: true });
           });

@@ -1,58 +1,96 @@
+// crop-behavior.js
+// 微信小程序 Behavior：处理剪裁框的显示、移动、调整大小和保存
+// 独立于 image-behavior.js，确保互不干扰
 module.exports = Behavior({
-  // ✅ 修正：必须使用 data: { ... } 语法
+  // 内部数据
   data: {
-    // 剪裁框数据（逻辑坐标）
-    cropBox: { x: 50, y: 50, width: 200, height: 200 },
-    
-    // 剪裁框触摸状态
+    cropBox: { x: 0, y: 0, width: 0, height: 0 }, // 剪裁框位置和尺寸（逻辑像素）
     activeCorner: null,    // 当前激活的角点：'tl', 'tr', 'bl', 'br'
     isDraggingCrop: false, // 是否正在拖拽角点调整大小
     isDraggingBox: false,  // 是否正在拖拽整个剪裁框
     cropTouchStart: null,  // 触摸开始时的坐标
-    cornerSize: 12         // 角点控制点半径
+    consts: {              // 常量定义
+      CORNER_SIZE: 12,     // 角点控制点半径（px）
+      MIN_SIZE: 50,        // 剪裁框最小尺寸（px）
+      TOUCH_THRESHOLD: 1,  // 触摸移动阈值（px）
+      CORNER_TOLERANCE: 5  // 角点点击容错（px）
+    }
   },
 
   methods: {
     /**
-     * 绘制剪裁框（遮罩层 + 边框 + 网格 + 角点）
+     * 初始化剪裁框位置（贴合图片四个角）
+     */
+    _initCropBox() {
+      const { imageObj, imageX, imageY, imageScale, imageRotation, canvasWidth, canvasHeight } = this.data;
+      if (!imageObj) {
+        console.warn('[剪裁框] 未加载图片，跳过初始化');
+        return;
+      }
+
+      // 计算图片在画布中的实际边界（考虑旋转和缩放）
+      const rad = (imageRotation * Math.PI) / 180;
+      const cos = Math.abs(Math.cos(rad));
+      const sin = Math.abs(Math.sin(rad));
+      const imgWidth = imageObj.width * imageScale;
+      const imgHeight = imageObj.height * imageScale;
+      const halfWidth = (imgWidth / 2 * cos) + (imgHeight / 2 * sin);
+      const halfHeight = (imgWidth / 2 * sin) + (imgHeight / 2 * cos);
+
+      // 剪裁框贴合图片边界
+      const cropBox = {
+        x: imageX - halfWidth,
+        y: imageY - halfHeight,
+        width: imgWidth,
+        height: imgHeight
+      };
+
+      // 限制剪裁框在画布内
+      cropBox.x = Math.max(0, Math.min(cropBox.x, canvasWidth - cropBox.width));
+      cropBox.y = Math.max(0, Math.min(cropBox.y, canvasHeight - cropBox.height));
+      cropBox.width = Math.min(cropBox.width, canvasWidth);
+      cropBox.height = Math.min(cropBox.height, canvasHeight);
+
+      this.setData({ cropBox }, () => {
+        this.throttledDraw && this.throttledDraw();
+      });
+    },
+
+    /**
+     * 绘制剪裁框（遮罩层 + 边框 + 九宫格 + 角点）
      */
     _drawCropBox() {
-      const { ctx2d, cropBox, cornerSize, width, height } = this.data;
-      if (!ctx2d) return;
+      const { ctx2d, cropBox, canvasWidth, canvasHeight } = this.data;
+      const { CORNER_SIZE } = this.data.consts;
+      if (!ctx2d || !this.data.imageObj) return;
 
       // 保存状态
       ctx2d.save();
 
-      // 绘制半透明遮罩层
-      ctx2d.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx2d.fillRect(0, 0, width, height);
+      // 绘制半透明遮罩层（调整为更暗，外部透明度略低）
+      ctx2d.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx2d.fillRect(0, 0, canvasWidth, canvasHeight);
 
-      // “挖空”剪裁区域
+      // “挖空”剪裁区域（内部完全透明）
       ctx2d.globalCompositeOperation = 'destination-out';
       ctx2d.fillRect(cropBox.x, cropBox.y, cropBox.width, cropBox.height);
-      ctx2d.globalCompositeOperation = 'source-over'; // 恢复默认合成模式
-      ctx2d.restore();
+      ctx2d.globalCompositeOperation = 'source-over';
 
       // 绘制剪裁框边框
       ctx2d.strokeStyle = '#ffffff';
       ctx2d.lineWidth = 2;
       ctx2d.strokeRect(cropBox.x, cropBox.y, cropBox.width, cropBox.height);
 
-      // 绘制网格线（九宫格辅助线）
+      // 绘制九宫格辅助线
       ctx2d.strokeStyle = 'rgba(255, 255, 255, 0.5)';
       ctx2d.lineWidth = 1;
-      
-      // 竖直网格线
       for (let i = 1; i < 3; i++) {
         const x = cropBox.x + (cropBox.width / 3) * i;
         ctx2d.beginPath();
         ctx2d.moveTo(x, cropBox.y);
         ctx2d.lineTo(x, cropBox.y + cropBox.height);
         ctx2d.stroke();
-      }
-      
-      // 水平网格线
-      for (let i = 1; i < 3; i++) {
+
         const y = cropBox.y + (cropBox.height / 3) * i;
         ctx2d.beginPath();
         ctx2d.moveTo(cropBox.x, y);
@@ -64,56 +102,57 @@ module.exports = Behavior({
       ctx2d.fillStyle = '#ffffff';
       ctx2d.strokeStyle = '#007aff';
       ctx2d.lineWidth = 2;
-      
       const corners = [
         { x: cropBox.x, y: cropBox.y }, // 左上
         { x: cropBox.x + cropBox.width, y: cropBox.y }, // 右上
         { x: cropBox.x, y: cropBox.y + cropBox.height }, // 左下
         { x: cropBox.x + cropBox.width, y: cropBox.y + cropBox.height } // 右下
       ];
-      
       corners.forEach(corner => {
         ctx2d.beginPath();
-        ctx2d.arc(corner.x, corner.y, cornerSize, 0, 2 * Math.PI);
+        ctx2d.arc(corner.x, corner.y, CORNER_SIZE, 0, 2 * Math.PI);
         ctx2d.fill();
         ctx2d.stroke();
       });
+
+      ctx2d.restore();
     },
 
     /**
-     * 将触摸坐标转换为逻辑坐标（除以 DPR）
+     * 将触摸坐标转换为逻辑坐标（使用 touch.x/y）
      * @param {Object} touch 微信触摸对象
      * @returns {Object} {x, y} 逻辑坐标
      */
     _getTouchCanvasPos(touch) {
-      const { canvasRect, dpr } = this.data;
-      if (!canvasRect || !dpr) return { x: 0, y: 0 };
       return {
-        x: (touch.clientX - canvasRect.left) / dpr,
-        y: (touch.clientY - canvasRect.top) / dpr
+        x: touch.x,
+        y: touch.y
       };
     },
 
     /**
-     * 检测触摸点是否在某个角点上
+     * 检测触摸点是否在角点上
      * @param {Object} touchPos {x, y}
      * @returns {String|null} 角点 ID 或 null
      */
     _detectCorner(touchPos) {
-      const { cropBox, cornerSize } = this.data;
+      const { cropBox } = this.data;
+      const { CORNER_SIZE, CORNER_TOLERANCE } = this.data.consts;
       const corners = [
         { id: 'tl', x: cropBox.x, y: cropBox.y },
         { id: 'tr', x: cropBox.x + cropBox.width, y: cropBox.y },
         { id: 'bl', x: cropBox.x, y: cropBox.y + cropBox.height },
         { id: 'br', x: cropBox.x + cropBox.width, y: cropBox.y + cropBox.height }
       ];
-      
+
       for (let corner of corners) {
         const distance = Math.hypot(touchPos.x - corner.x, touchPos.y - corner.y);
-        if (distance <= cornerSize + 5) { // 增加 5px 容错
+        if (distance <= CORNER_SIZE + CORNER_TOLERANCE) { 
+          console.log('[剪裁框] 检测到角点:', corner.id, '距离:', distance);
           return corner.id;
         }
       }
+      console.log('[剪裁框] 未检测到角点');
       return null;
     },
 
@@ -124,10 +163,12 @@ module.exports = Behavior({
      */
     _isInsideCropBox(touchPos) {
       const { cropBox } = this.data;
-      return touchPos.x >= cropBox.x && 
-             touchPos.x <= cropBox.x + cropBox.width &&
-             touchPos.y >= cropBox.y && 
-             touchPos.y <= cropBox.y + cropBox.height;
+      const inside = touchPos.x >= cropBox.x &&
+                    touchPos.x <= cropBox.x + cropBox.width &&
+                    touchPos.y >= cropBox.y &&
+                    touchPos.y <= cropBox.y + cropBox.height;
+      console.log('[剪裁框] 是否在内部:', inside);
+      return inside;
     },
 
     /**
@@ -142,20 +183,16 @@ module.exports = Behavior({
       
       if (corner) {
         // 触摸到角点
-        this.setData({
-          activeCorner: corner,
-          isDraggingCrop: true,
-          isDraggingBox: false,
-          cropTouchStart: touchPos
-        });
+        this.data.activeCorner = corner;
+        this.data.isDraggingCrop = true;
+        this.data.isDraggingBox = false;
+        this.data.cropTouchStart = touchPos;
       } else if (this._isInsideCropBox(touchPos)) {
         // 触摸到剪裁框内部
-        this.setData({
-          activeCorner: null,
-          isDraggingCrop: false,
-          isDraggingBox: true,
-          cropTouchStart: touchPos
-        });
+        this.data.activeCorner = null;
+        this.data.isDraggingCrop = false;
+        this.data.isDraggingBox = true;
+        this.data.cropTouchStart = touchPos;
       }
     },
 
@@ -173,7 +210,7 @@ module.exports = Behavior({
       const dy = currentPos.y - cropTouchStart.y;
 
       let newCropBox = { ...cropBox };
-      const minSize = 50; // 最小尺寸
+      const minSize = this.data.consts.MIN_SIZE;
 
       if (isDraggingCrop && activeCorner) {
         // 拖拽角点调整大小
@@ -258,7 +295,7 @@ module.exports = Behavior({
         const offsetX = imageX - cropBox.x;
         const offsetY = imageY - cropBox.y;
 
-        // 计算图片中心点（相对于剪裁区域）
+        // 计算图片中心点（相对剪裁区域）
         const imgCenterX = offsetX + (imageObj.width * imageScale) / 2;
         const imgCenterY = offsetY + (imageObj.height * imageScale) / 2;
 

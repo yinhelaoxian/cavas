@@ -7,5 +7,8 @@
     "navigationBarBackgroundColor": "#fff",
     "navigationBarTitleText": "图片处理",
     "navigationBarTextStyle": "black"
+  },
+  "miniprogramRoot": {
+    "minWxVersion": "2.7.0"
   }
 }

@@ -103,6 +103,7 @@ module.exports = Behavior({
                 }, () => {
                   this.data.rotatedSizeCache = null; // 失效边界缓存
                   this._centerImage();
+                  this._initCropBox(); // 初始化剪裁框
                   this.throttledDraw && this.throttledDraw();
                 });
               };
@@ -327,6 +328,7 @@ module.exports = Behavior({
         return;
       }
       this._centerImage();
+      this._initCropBox(); // 初始化剪裁框
       this.setData({ imageRotation: 0 }, () => {
         this.data.rotatedSizeCache = null; // 失效缓存
         this.throttledDraw && this.throttledDraw();
