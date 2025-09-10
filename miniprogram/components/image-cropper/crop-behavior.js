@@ -68,7 +68,7 @@ module.exports = Behavior({
       ctx2d.save();
 
       // 绘制半透明遮罩层（调整为更暗，外部透明度略低）
-      ctx2d.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx2d.fillStyle = 'rgba(0, 0, 0, 0.1)';
       ctx2d.fillRect(0, 0, canvasWidth, canvasHeight);
 
       // “挖空”剪裁区域（内部完全透明）

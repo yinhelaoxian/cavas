@@ -10,24 +10,4 @@
     catchtouchend="_onTouchEnd"
     catchtouchcancel="_onTouchEnd"
   />
-  
-  <!-- 模式切换按钮 -->
-  <view class="mode-switch">
-    <button 
-      class="mode-btn {{mode === 'image' ? 'active' : ''}}"
-      bindtap="switchMode"
-      data-mode="image"
-      size="mini"
-    >
-      编辑图片
-    </button>
-    <button 
-      class="mode-btn {{mode === 'crop' ? 'active' : ''}}"
-      bindtap="switchMode"
-      data-mode="crop"
-      size="mini"
-    >
-      剪裁模式
-    </button>
-  </view>
 </view>

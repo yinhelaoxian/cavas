@@ -11,6 +11,8 @@ module.exports = Behavior({
     imageY: 0,             // 图片中心点 Y 坐标（逻辑像素）
     imageScale: 1,         // 图片缩放比例
     imageRotation: 0,      // 图片旋转角度（度）
+    userImageX: 0,         // 用户手动调整的 X 坐标，跟踪中心点
+    userImageY: 0,         // 用户手动调整的 Y 坐标，跟踪中心点
     touchStartData: null,  // 触摸开始时的坐标数组
     lastTouchData: null,   // 上一次触摸坐标数组
     isDraggingImage: false,// 是否正在拖动图片
@@ -18,8 +20,9 @@ module.exports = Behavior({
     isMoving: false,       // 防止绘制重入
     rotatedSizeCache: null,// 缓存旋转后边界计算结果
     consts: {              // 常量定义
-      MAX_SCALE: 5,        // 最大缩放比例
-      MIN_SCALE_FACTOR: 0.5, // 最小缩放因子
+      MAX_SCALE: 5,        // 最大缩放比例（保留原有）
+      MIN_SCALE_FACTOR: 0.5, // 最小缩放因子（保留原有）
+      MAX_IMAGE_SCALE: 2.0, // 限制图片最大缩放比例
       TOUCH_THRESHOLD: 1,  // 触摸移动阈值（px）
       ROTATE_STEP: 90      // 旋转步进角度（度）
     }
@@ -99,7 +102,9 @@ module.exports = Behavior({
                 this.setData({
                   imageInfo,
                   imageObj,
-                  imageRotation: 0
+                  imageRotation: 0,
+                  userImageX: this.data.canvasWidth / 2, // 初始化用户中心点为画布中心
+                  userImageY: this.data.canvasHeight / 2
                 }, () => {
                   this.data.rotatedSizeCache = null; // 失效边界缓存
                   this._centerImage();
@@ -148,7 +153,9 @@ module.exports = Behavior({
       this.setData({
         imageX: imageX,
         imageY: imageY,
-        imageScale: scale
+        imageScale: scale,
+        userImageX: imageX, // 更新用户中心点
+        userImageY: imageY
       });
       this.data.rotatedSizeCache = null; // 失效边界缓存
     },
@@ -193,7 +200,7 @@ module.exports = Behavior({
      */
     _onImageTouchMove(e) {
       const { touches } = e;
-      const { lastTouchData, imageX, imageY, imageScale, isDraggingImage, isScaling } = this.data;
+      const { lastTouchData, imageX, imageY, imageScale, isDraggingImage, isScaling, consts } = this.data;
       
       if (!touches || !lastTouchData || !this.data.imageObj) return;
 
@@ -204,10 +211,12 @@ module.exports = Behavior({
         const dy = currentLogicalTouches[0].y - lastTouchData[0].y;
         
         // 防抖动：忽略小移动
-        if (Math.abs(dx) < this.data.consts.TOUCH_THRESHOLD && Math.abs(dy) < this.data.consts.TOUCH_THRESHOLD) return;
+        if (Math.abs(dx) < consts.TOUCH_THRESHOLD && Math.abs(dy) < consts.TOUCH_THRESHOLD) return;
         
         this.data.imageX = imageX + dx;
         this.data.imageY = imageY + dy;
+        this.data.userImageX = this.data.imageX; // 更新用户中心点
+        this.data.userImageY = this.data.imageY;
         this.data.lastTouchData = currentLogicalTouches;
 
         // 边界检查
@@ -234,37 +243,40 @@ module.exports = Behavior({
         if (lastDistance > 0) {
           const scaleRatio = currentDistance / lastDistance;
           let newScale = imageScale * scaleRatio;
-          const minScale = Math.min(this.data.canvasWidth / this.data.imageObj.width, this.data.canvasHeight / this.data.imageObj.height) * this.data.consts.MIN_SCALE_FACTOR;
-          newScale = Math.max(minScale, Math.min(newScale, this.data.consts.MAX_SCALE));
+          const minScale = Math.min(this.data.canvasWidth / this.data.imageObj.width, this.data.canvasHeight / this.data.imageObj.height) * consts.MIN_SCALE_FACTOR;
+          newScale = Math.max(minScale, Math.min(newScale, consts.MAX_IMAGE_SCALE)); // 限制最大缩放为 2.0
 
-          this.data.imageScale = newScale;
-          this.data.lastTouchData = currentLogicalTouches;
-          this.data.rotatedSizeCache = null; // 失效缓存
+          if (newScale !== imageScale) {
+            this.data.imageScale = newScale;
+            this.data.lastTouchData = currentLogicalTouches;
+            this.data.rotatedSizeCache = null; // 失效缓存
 
-          if (!this.data.isMoving) {
-            this.data.isMoving = true;
-            wx.nextTick(() => {
-              this._drawCanvas();
-              this.data.isMoving = false;
-            });
+            if (!this.data.isMoving) {
+              this.data.isMoving = true;
+              wx.nextTick(() => {
+                this._drawCanvas();
+                this.data.isMoving = false;
+              });
+            }
           }
         }
       }
     },
 
     /**
-     * 边界检查，限制图片位置（支持旋转）
+     * 边界检查，限制图片位置（支持旋转，仅在超出边界时调整）
      */
     _clampImagePosition() {
-      const { imageObj, imageScale, imageRotation, canvasWidth, canvasHeight, boundaryPadding } = this.data;
+      const { imageObj, imageScale, imageRotation, canvasWidth, canvasHeight, boundaryPadding, userImageX, userImageY } = this.data;
       if (!imageObj) return;
 
       // 缓存旋转计算结果
       const cacheKey = `${imageRotation}-${imageScale}-${imageObj.width}-${imageObj.height}`;
       if (this.data.rotatedSizeCache && this.data.rotatedSizeCache.key === cacheKey) {
         const { halfWidth, halfHeight } = this.data.rotatedSizeCache;
-        this.data.imageX = Math.max(halfWidth, Math.min(this.data.imageX, canvasWidth - halfWidth));
-        this.data.imageY = Math.max(halfHeight, Math.min(this.data.imageY, canvasHeight - halfHeight));
+        // 仅在超出边界时调整，保留用户中心点
+        this.data.imageX = Math.max(halfWidth, Math.min(userImageX, canvasWidth - halfWidth));
+        this.data.imageY = Math.max(halfHeight, Math.min(userImageY, canvasHeight - halfHeight));
         return;
       }
 
@@ -274,8 +286,9 @@ module.exports = Behavior({
       const halfWidth = (imageObj.width * imageScale / 2 * cos) + (imageObj.height * imageScale / 2 * sin) + boundaryPadding;
       const halfHeight = (imageObj.width * imageScale / 2 * sin) + (imageObj.height * imageScale / 2 * cos) + boundaryPadding;
 
-      this.data.imageX = Math.max(halfWidth, Math.min(this.data.imageX, canvasWidth - halfWidth));
-      this.data.imageY = Math.max(halfHeight, Math.min(this.data.imageY, canvasHeight - halfHeight));
+      // 保留用户中心点，仅限制边界
+      this.data.imageX = Math.max(halfWidth, Math.min(userImageX, canvasWidth - halfWidth));
+      this.data.imageY = Math.max(halfHeight, Math.min(userImageY, canvasHeight - halfHeight));
 
       this.data.rotatedSizeCache = {
         key: cacheKey,
@@ -303,18 +316,26 @@ module.exports = Behavior({
     },
 
     /**
-     * 旋转图片 90 度
+     * 旋转图片 90 度，保持用户调整的中心点
      */
     _rotateImage() {
       if (!this.data.imageObj) {
         wx.showToast({ title: '请先选择图片', icon: 'none' });
         return;
       }
+      // 保存用户调整的中心点
+      const userImageX = this.data.userImageX;
+      const userImageY = this.data.userImageY;
       this.setData({
         imageRotation: (this.data.imageRotation + this.data.consts.ROTATE_STEP) % 360
       }, () => {
         this.data.rotatedSizeCache = null; // 失效缓存
-        this._clampImagePosition(); // 旋转后检查边界
+        // 恢复用户中心点并检查边界
+        this.data.userImageX = userImageX;
+        this.data.userImageY = userImageY;
+        this.data.imageX = userImageX;
+        this.data.imageY = userImageY;
+        this._clampImagePosition(); // 仅限制边界
         this.throttledDraw && this.throttledDraw();
       });
     },
