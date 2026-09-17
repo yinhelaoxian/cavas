@@ -1,7 +1,6 @@
 // image-behavior.js
 // 微信小程序 Behavior：处理图片加载、移动、缩放、旋转
 module.exports = Behavior({
-  // 内部数据
   data: {
     ctx2d: null,           // Canvas 2D 上下文
     canvasNode: null,      // Canvas 节点
@@ -11,8 +10,8 @@ module.exports = Behavior({
     imageY: 0,             // 图片中心点 Y 坐标（逻辑像素）
     imageScale: 1,         // 图片缩放比例
     imageRotation: 0,      // 图片旋转角度（度）
-    userImageX: 0,         // 用户手动调整的 X 坐标，跟踪中心点
-    userImageY: 0,         // 用户手动调整的 Y 坐标，跟踪中心点
+    userImageX: 0,         // 用户手动调整的 X 坐标
+    userImageY: 0,         // 用户手动调整的 Y 坐标
     touchStartData: null,  // 触摸开始时的坐标数组
     lastTouchData: null,   // 上一次触摸坐标数组
     isDraggingImage: false,// 是否正在拖动图片
@@ -20,40 +19,92 @@ module.exports = Behavior({
     isMoving: false,       // 防止绘制重入
     rotatedSizeCache: null,// 缓存旋转后边界计算结果
     consts: {              // 常量定义
-      MAX_SCALE: 5,        // 最大缩放比例（保留原有）
-      MIN_SCALE_FACTOR: 0.5, // 最小缩放因子（保留原有）
-      MAX_IMAGE_SCALE: 2.0, // 限制图片最大缩放比例
-      TOUCH_THRESHOLD: 1,  // 触摸移动阈值（px）
+      MAX_SCALE: 5,        // 最大缩放比例
+      MIN_SCALE_FACTOR: 0.5, // 最小缩放因子
+      TOUCH_THRESHOLD: 3,  // 触摸移动阈值（像素）
       ROTATE_STEP: 90      // 旋转步进角度（度）
-    }
+    },
+    maxImageSize: 2000     // 最大图片尺寸（像素）
   },
 
   methods: {
     /**
-     * 绘制图片到 Canvas（以 imageX/Y 为中心点绘制）
+     * 内部方法：处理图片选择结果
+     * @param {string} imagePath 图片本地临时路径
+     * @returns {Promise<void>} 加载结果
+     */
+    _handleImageSelected(imagePath) {
+      const { canvasNode, canvasWidth, canvasHeight, maxImageSize } = this.data;
+      if (!canvasNode || canvasWidth === 0 || canvasHeight === 0) {
+        return Promise.reject(new Error('画布或尺寸未就绪'));
+      }
+
+      return new Promise((resolve, reject) => {
+        wx.getImageInfo({
+          src: imagePath,
+          success: (imageInfo) => {
+            let compressWidth = imageInfo.width;
+            let compressHeight = imageInfo.height;
+            if (compressWidth > maxImageSize || compressHeight > maxImageSize) {
+              const ratio = Math.min(maxImageSize / compressWidth, maxImageSize / compressHeight);
+              compressWidth = Math.floor(compressWidth * ratio);
+              compressHeight = Math.floor(compressHeight * ratio);
+            }
+
+            wx.compressImage({
+              src: imagePath,
+              width: compressWidth,
+              height: compressHeight,
+              quality: 80,
+              success: (compressRes) => {
+                const imageObj = canvasNode.createImage();
+                imageObj.onload = () => {
+                  this.setData({
+                    imageInfo,
+                    imageObj,
+                    imageRotation: 0,
+                    userImageX: canvasWidth / 2,
+                    userImageY: canvasHeight / 2
+                  }, () => {
+                    this.data.rotatedSizeCache = null;
+                    this._centerImage();
+                    resolve();
+                  });
+                };
+                imageObj.onerror = (err) => {
+                  this._destroyImageObj();
+                  reject(err);
+                };
+                imageObj.src = compressRes.tempFilePath;
+              },
+              fail: (err) => reject(err)
+            });
+          },
+          fail: (err) => reject(err)
+        });
+      });
+    },
+
+    /**
+     * 销毁图片对象
+     * @description 清理图片资源，防止内存泄漏
+     */
+    _destroyImageObj() {
+      const { imageObj } = this.data;
+      if (imageObj) {
+        imageObj.onload = null;
+        imageObj.onerror = null;
+        this.setData({ imageObj: null });
+      }
+    },
+
+    /**
+     * 绘制图片到 Canvas
+     * @description 以 imageX/Y 为中心点绘制，考虑旋转和缩放
      */
     _drawImage() {
       const { ctx2d, imageObj, imageX, imageY, imageScale, imageRotation, canvasWidth, canvasHeight } = this.data;
-      if (!ctx2d) return;
-
-      // 绘制画布边框
-      ctx2d.strokeStyle = '#cccccc';
-      ctx2d.setLineDash([5, 3]);
-      ctx2d.lineWidth = 1;
-      ctx2d.strokeRect(0, 0, canvasWidth, canvasHeight);
-      ctx2d.setLineDash([]);
-
-      // 图片未加载时显示提示
-      if (!imageObj) {
-        ctx2d.fillStyle = '#f5f5f5';
-        ctx2d.fillRect(0, 0, canvasWidth, canvasHeight);
-        ctx2d.fillStyle = '#999';
-        ctx2d.font = '14px sans-serif';
-        ctx2d.textAlign = 'center';
-        ctx2d.textBaseline = 'middle';
-        ctx2d.fillText('请选择图片', canvasWidth / 2, canvasHeight / 2);
-        return;
-      }
+      if (!ctx2d || !imageObj) return;
 
       ctx2d.save();
       ctx2d.translate(imageX, imageY);
@@ -61,103 +112,33 @@ module.exports = Behavior({
 
       const drawWidth = imageObj.width * imageScale;
       const drawHeight = imageObj.height * imageScale;
-
-      ctx2d.drawImage(
-        imageObj,
-        -drawWidth / 2,
-        -drawHeight / 2,
-        drawWidth,
-        drawHeight
-      );
+      ctx2d.drawImage(imageObj, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
       ctx2d.restore();
     },
 
     /**
-     * 选择图片（从相册或相机）
-     */
-    _chooseImage() {
-      const { canvasNode } = this.data;
-      if (!canvasNode) {
-        wx.showToast({ title: '画布未就绪', icon: 'none' });
-        return;
-      }
-
-      wx.chooseImage({
-        count: 1,
-        sourceType: ['album', 'camera'],
-        success: (res) => {
-          const imagePath = res.tempFilePaths[0];
-          wx.getImageInfo({
-            src: imagePath,
-            success: (imageInfo) => {
-              const imageObj = canvasNode.createImage();
-              // 加载超时处理
-              const loadTimeout = setTimeout(() => {
-                console.error('[图片行为] 图片加载超时');
-                wx.showToast({ title: '图片加载超时', icon: 'none' });
-              }, 5000);
-
-              imageObj.onload = () => {
-                clearTimeout(loadTimeout);
-                this.setData({
-                  imageInfo,
-                  imageObj,
-                  imageRotation: 0,
-                  userImageX: this.data.canvasWidth / 2, // 初始化用户中心点为画布中心
-                  userImageY: this.data.canvasHeight / 2
-                }, () => {
-                  this.data.rotatedSizeCache = null; // 失效边界缓存
-                  this._centerImage();
-                  this._initCropBox(); // 初始化剪裁框
-                  this.throttledDraw && this.throttledDraw();
-                });
-              };
-              imageObj.onerror = (err) => {
-                clearTimeout(loadTimeout);
-                console.error('[图片行为] 图片加载失败:', err);
-                wx.showToast({ title: '图片加载失败', icon: 'none' });
-              };
-              imageObj.src = imagePath;
-            },
-            fail: (err) => {
-              console.error('[图片行为] 获取图片信息失败:', err);
-              wx.showToast({ title: '获取图片信息失败', icon: 'none' });
-            }
-          });
-        },
-        fail: (err) => {
-          console.error('[图片行为] 选择图片失败:', err);
-          wx.showToast({ title: '选择图片失败', icon: 'none' });
-        }
-      });
-    },
-
-    /**
-     * 将图片居中显示在画布内
+     * 将图片居中显示
      */
     _centerImage() {
       const { imageObj, canvasWidth, canvasHeight, imagePadding } = this.data;
-      if (!imageObj || !canvasWidth || !canvasHeight) return;
+      if (!imageObj) return;
 
       const padding = imagePadding;
-      const availableWidth = canvasWidth - padding;
-      const availableHeight = canvasHeight - padding;
+      const availableWidth = canvasWidth - 2 * padding;
+      const availableHeight = canvasHeight - 2 * padding;
 
       const scaleX = availableWidth / imageObj.width;
       const scaleY = availableHeight / imageObj.height;
       const scale = Math.min(scaleX, scaleY, 1);
 
-      const imageX = canvasWidth / 2;
-      const imageY = canvasHeight / 2;
-
       this.setData({
-        imageX: imageX,
-        imageY: imageY,
+        imageX: canvasWidth / 2,
+        imageY: canvasHeight / 2,
         imageScale: scale,
-        userImageX: imageX, // 更新用户中心点
-        userImageY: imageY
+        userImageX: canvasWidth / 2,
+        userImageY: canvasHeight / 2
       });
-      this.data.rotatedSizeCache = null; // 失效边界缓存
+      this.data.rotatedSizeCache = null;
     },
 
     /**
@@ -166,10 +147,7 @@ module.exports = Behavior({
      * @returns {Object} {x, y} 逻辑坐标
      */
     _getLogicalTouch(touch) {
-      return {
-        x: touch.x,
-        y: touch.y
-      };
+      return { x: touch.x, y: touch.y };
     },
 
     /**
@@ -178,11 +156,12 @@ module.exports = Behavior({
      */
     _onImageTouchStart(e) {
       const { touches } = e;
-      if (!touches || touches.length === 0) return;
+      if (!Array.isArray(touches) || touches.length === 0) {
+        console.warn('[触摸事件] 无效的 touches 参数');
+        return;
+      }
 
       const logicalTouches = touches.map(touch => this._getLogicalTouch(touch));
-
-      // 直接修改临时状态，避免 setData 异步延迟
       this.data.touchStartData = logicalTouches;
       this.data.lastTouchData = logicalTouches;
       if (touches.length === 1) {
@@ -200,81 +179,63 @@ module.exports = Behavior({
      */
     _onImageTouchMove(e) {
       const { touches } = e;
-      const { lastTouchData, imageX, imageY, imageScale, isDraggingImage, isScaling, consts } = this.data;
-      
-      if (!touches || !lastTouchData || !this.data.imageObj) return;
+      if (!Array.isArray(touches) || !this.data.lastTouchData) return;
 
       const currentLogicalTouches = touches.map(touch => this._getLogicalTouch(touch));
+      const { imageX, imageY, imageScale, isDraggingImage, isScaling, consts } = this.data;
 
       if (isDraggingImage && touches.length === 1) {
-        const dx = currentLogicalTouches[0].x - lastTouchData[0].x;
-        const dy = currentLogicalTouches[0].y - lastTouchData[0].y;
-        
-        // 防抖动：忽略小移动
-        if (Math.abs(dx) < consts.TOUCH_THRESHOLD && Math.abs(dy) < consts.TOUCH_THRESHOLD) return;
-        
+        const dx = currentLogicalTouches[0].x - this.data.lastTouchData[0].x;
+        const dy = currentLogicalTouches[0].y - this.data.lastTouchData[0].y;
+        const moveDistance = Math.sqrt(dx * dx + dy * dy);
+        if (moveDistance < consts.TOUCH_THRESHOLD) return;
+
         this.data.imageX = imageX + dx;
         this.data.imageY = imageY + dy;
-        this.data.userImageX = this.data.imageX; // 更新用户中心点
+        this.data.userImageX = this.data.imageX;
         this.data.userImageY = this.data.imageY;
         this.data.lastTouchData = currentLogicalTouches;
-
-        // 边界检查
         this._clampImagePosition();
-
-        // 立即绘制
-        if (!this.data.isMoving) {
-          this.data.isMoving = true;
-          wx.nextTick(() => {
-            this._drawCanvas();
-            this.data.isMoving = false;
-          });
-        }
       } else if (isScaling && touches.length === 2) {
-        const getDistance = (points) => {
-          const dx = points[1].x - points[0].x;
-          const dy = points[1].y - points[0].y;
-          return Math.sqrt(dx * dx + dy * dy);
-        };
+        const getDistance = (points) => Math.sqrt((points[1].x - points[0].x) ** 2 + (points[1].y - points[0].y) ** 2);
+        const getCenter = (points) => ({
+          x: (points[0].x + points[1].x) / 2,
+          y: (points[0].y + points[1].y) / 2
+        });
 
         const currentDistance = getDistance(currentLogicalTouches);
-        const lastDistance = getDistance(lastTouchData);
-        
+        const lastDistance = getDistance(this.data.lastTouchData);
+        const currentCenter = getCenter(currentLogicalTouches);
+        const lastCenter = getCenter(this.data.lastTouchData);
+
         if (lastDistance > 0) {
           const scaleRatio = currentDistance / lastDistance;
           let newScale = imageScale * scaleRatio;
           const minScale = Math.min(this.data.canvasWidth / this.data.imageObj.width, this.data.canvasHeight / this.data.imageObj.height) * consts.MIN_SCALE_FACTOR;
-          newScale = Math.max(minScale, Math.min(newScale, consts.MAX_IMAGE_SCALE)); // 限制最大缩放为 2.0
+          newScale = Math.max(minScale, Math.min(newScale, this.data.maxImageScale));
 
           if (newScale !== imageScale) {
             this.data.imageScale = newScale;
+            this.data.imageX += (currentCenter.x - lastCenter.x) * (1 - scaleRatio);
+            this.data.imageY += (currentCenter.y - lastCenter.y) * (1 - scaleRatio);
             this.data.lastTouchData = currentLogicalTouches;
-            this.data.rotatedSizeCache = null; // 失效缓存
-
-            if (!this.data.isMoving) {
-              this.data.isMoving = true;
-              wx.nextTick(() => {
-                this._drawCanvas();
-                this.data.isMoving = false;
-              });
-            }
+            this.data.rotatedSizeCache = null;
           }
         }
       }
     },
 
     /**
-     * 边界检查，限制图片位置（支持旋转，仅在超出边界时调整）
+     * 边界检查
+     * @description 限制图片位置，支持旋转场景
      */
     _clampImagePosition() {
       const { imageObj, imageScale, imageRotation, canvasWidth, canvasHeight, boundaryPadding, userImageX, userImageY } = this.data;
       if (!imageObj) return;
 
-      // 缓存旋转计算结果
       const cacheKey = `${imageRotation}-${imageScale}-${imageObj.width}-${imageObj.height}`;
       if (this.data.rotatedSizeCache && this.data.rotatedSizeCache.key === cacheKey) {
         const { halfWidth, halfHeight } = this.data.rotatedSizeCache;
-        // 仅在超出边界时调整，保留用户中心点
         this.data.imageX = Math.max(halfWidth, Math.min(userImageX, canvasWidth - halfWidth));
         this.data.imageY = Math.max(halfHeight, Math.min(userImageY, canvasHeight - halfHeight));
         return;
@@ -286,73 +247,51 @@ module.exports = Behavior({
       const halfWidth = (imageObj.width * imageScale / 2 * cos) + (imageObj.height * imageScale / 2 * sin) + boundaryPadding;
       const halfHeight = (imageObj.width * imageScale / 2 * sin) + (imageObj.height * imageScale / 2 * cos) + boundaryPadding;
 
-      // 保留用户中心点，仅限制边界
       this.data.imageX = Math.max(halfWidth, Math.min(userImageX, canvasWidth - halfWidth));
       this.data.imageY = Math.max(halfHeight, Math.min(userImageY, canvasHeight - halfHeight));
 
-      this.data.rotatedSizeCache = {
-        key: cacheKey,
-        halfWidth,
-        halfHeight
-      };
+      this.data.rotatedSizeCache = { key: cacheKey, halfWidth, halfHeight };
     },
 
     /**
-     * 图片触摸结束（同步最终状态）
+     * 图片触摸结束
+     * @param {Object} e 触摸事件对象
      */
     _onImageTouchEnd() {
-      // 直接清零临时状态
       this.data.isDraggingImage = false;
       this.data.isScaling = false;
       this.data.touchStartData = null;
       this.data.lastTouchData = null;
-
-      this.setData({
-        isDraggingImage: false,
-        isScaling: false,
-        touchStartData: null,
-        lastTouchData: null
-      });
     },
 
     /**
-     * 旋转图片 90 度，保持用户调整的中心点
+     * 旋转图片
      */
     _rotateImage() {
-      if (!this.data.imageObj) {
-        wx.showToast({ title: '请先选择图片', icon: 'none' });
-        return;
-      }
-      // 保存用户调整的中心点
       const userImageX = this.data.userImageX;
       const userImageY = this.data.userImageY;
       this.setData({
         imageRotation: (this.data.imageRotation + this.data.consts.ROTATE_STEP) % 360
       }, () => {
-        this.data.rotatedSizeCache = null; // 失效缓存
-        // 恢复用户中心点并检查边界
+        this.data.rotatedSizeCache = null;
         this.data.userImageX = userImageX;
         this.data.userImageY = userImageY;
         this.data.imageX = userImageX;
         this.data.imageY = userImageY;
-        this._clampImagePosition(); // 仅限制边界
-        this.throttledDraw && this.throttledDraw();
+        this._clampImagePosition();
+        this._drawCanvas();
       });
     },
 
     /**
-     * 重置图片位置、缩放、旋转
+     * 重置图片
      */
     _resetImage() {
-      if (!this.data.imageObj) {
-        wx.showToast({ title: '请先选择图片', icon: 'none' });
-        return;
-      }
       this._centerImage();
-      this._initCropBox(); // 初始化剪裁框
+      this._initCropBox();
       this.setData({ imageRotation: 0 }, () => {
-        this.data.rotatedSizeCache = null; // 失效缓存
-        this.throttledDraw && this.throttledDraw();
+        this.data.rotatedSizeCache = null;
+        this._drawCanvas();
       });
     }
   }

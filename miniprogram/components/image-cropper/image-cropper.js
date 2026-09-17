@@ -1,10 +1,10 @@
+// image-cropper.js
 // 微信小程序自定义组件：图片剪裁器主组件
-// 负责 Canvas 初始化、模式切换和事件分发
-// 使用两个 Behavior：image-behavior.js (图片处理) 和 crop-behavior.js (剪裁框处理)
+// 负责 Canvas 初始化、事件分发和整体管理
 Component({
   behaviors: [
-    require('./image-behavior.js'),
-    require('./crop-behavior.js')
+    require('./image-behavior.js'), // 图片处理行为
+    require('./crop-behavior.js')   // 剪裁框处理行为
   ],
   
   // 属性定义
@@ -39,12 +39,8 @@ Component({
     detached() {
       // 组件从页面节点树移除时执行，清理资源防止内存泄漏
       const { canvasNode, imageObj } = this.data;
-      if (canvasNode) {
-        canvasNode.destroy && canvasNode.destroy();
-      }
-      if (imageObj) {
-        imageObj.src = '';
-      }
+      if (canvasNode) canvasNode.destroy && canvasNode.destroy();
+      if (imageObj) imageObj.src = '';
     }
   },
 
@@ -84,7 +80,6 @@ Component({
             canvasRect: res[0].rect || { left: 0, top: 0, width: renderWidth, height: renderHeight } // 补充容错
           }, () => {
             console.log('[组件] Canvas 2D 初始化成功:', { width: renderWidth, height: renderHeight, dpr });
-            console.log('[Canvas Rect] 实际值:', res[0].rect, '使用值:', this.data.canvasRect); // 补充日志
             this._initDrawFunction();
             this.triggerEvent('ready', { status: true });
           });
@@ -101,20 +96,16 @@ Component({
     },
 
     /**
-     * 统一绘制函数：清空画布 → 绘制图片 → 自动绘制剪裁框（图片加载后）
+     * 统一绘制函数：清空画布 → 绘制图片 → 绘制剪裁框（如启用）
      */
     _drawCanvas() {
-      const { ctx2d, canvasWidth, canvasHeight, imageObj } = this.data;
+      const { ctx2d, canvasWidth, canvasHeight } = this.data;
       if (!ctx2d) return;
 
       ctx2d.clearRect(0, 0, canvasWidth, canvasHeight);
       this._drawImage();
       
-      // 图片加载完成后自动初始化并绘制剪裁框
-      if (imageObj && !this.data.cropBox.width && !this.data.cropBox.height) {
-        this._initCropBox();
-      }
-      if (this.data.cropBox.width > 0 && this.data.cropBox.height > 0) {
+      if (this.data.mode === 'crop') {
         this._drawCropBox();
       }
     },
@@ -136,80 +127,41 @@ Component({
     },
 
     /**
-     * 触摸开始事件分发，自动判断交互类型
+     * 触摸开始事件分发
      * @param {Object} e 触摸事件对象
      */
     _onTouchStart(e) {
-      const { touches } = e;
-      if (!touches || !this.data.imageObj) return;
-
-      const touchPos = this._getTouchCanvasPos(touches[0]);
-      const corner = this._detectCorner(touchPos);
-      const isInside = this._isInsideCropBox(touchPos);
-
-      if (touches.length === 1) {
-        // 单指操作
-        if (corner) {
-          this.data.activeCorner = corner;
-          this.data.isDraggingCrop = true;
-          this.data.isDraggingBox = false;
-        } else if (isInside) {
-          this.data.activeCorner = null;
-          this.data.isDraggingCrop = false;
-          this.data.isDraggingBox = true;
-        } else {
-          this.data.activeCorner = null;
-          this.data.isDraggingCrop = false;
-          this.data.isDraggingBox = false;
-          this._onImageTouchStart(e); // 移动图片
-        }
-        this.data.cropTouchStart = touchPos;
-      } else if (touches.length === 2) {
-        // 双指操作，始终缩放图片
-        this._onImageTouchStart(e); // 初始化缩放状态
+      const { mode } = this.data;
+      if (mode === 'crop') {
+        this._onCropTouchStart(e);
+      } else {
+        this._onImageTouchStart(e);
       }
     },
 
     /**
-     * 触摸移动事件分发，自动判断交互类型
+     * 触摸移动事件分发
      * @param {Object} e 触摸事件对象
      */
     _onTouchMove(e) {
-      const { touches } = e;
-      if (!touches || !this.data.imageObj) return;
-
-      if (touches.length === 1) {
-        // 单指操作
-        const { cropTouchStart, activeCorner, isDraggingCrop, isDraggingBox } = this.data;
-        if (!cropTouchStart) return;
-
-        const currentPos = this._getTouchCanvasPos(touches[0]);
-        const dx = currentPos.x - cropTouchStart.x;
-        const dy = currentPos.y - cropTouchStart.y;
-
-        if (isDraggingCrop && activeCorner) {
-          this._onCropTouchMove(e); // 调整剪裁框大小
-        } else if (isDraggingBox) {
-          this._onCropTouchMove(e); // 移动剪裁框
-        } else {
-          this._onImageTouchMove(e); // 移动图片
-        }
-        this.data.cropTouchStart = currentPos;
-      } else if (touches.length === 2) {
-        // 双指操作，始终缩放图片
-        this._onImageTouchMove(e); // 缩放图片
+      const { mode } = this.data;
+      if (mode === 'crop') {
+        this._onCropTouchMove(e);
+      } else {
+        this._onImageTouchMove(e);
       }
     },
 
     /**
-     * 触摸结束事件分发，重置状态
+     * 触摸结束事件分发
      * @param {Object} e 触摸事件对象
      */
     _onTouchEnd(e) {
-      if (this.data.isDraggingCrop || this.data.isDraggingBox) {
-        this._onCropTouchEnd(e); // 重置剪裁框状态
+      const { mode } = this.data;
+      if (mode === 'crop') {
+        this._onCropTouchEnd(e);
       } else {
-        this._onImageTouchEnd(e); // 重置图片状态
+        this._onImageTouchEnd(e);
       }
     },
 
@@ -217,6 +169,17 @@ Component({
     chooseImage() { this._chooseImage(); },
     rotateImage() { this._rotateImage(); },
     resetImage() { this._resetImage(); },
-    saveCroppedImage() { return this._saveCroppedImage(); }
+    saveCroppedImage() { return this._saveCroppedImage(); },
+
+    /**
+     * 切换模式
+     * @param {Object} e 事件对象，包含 data-mode
+     */
+    switchMode(e) {
+      const mode = e.currentTarget.dataset.mode;
+      this.setData({ mode }, () => {
+        this.throttledDraw && this.throttledDraw();
+      });
+    }
   }
 });

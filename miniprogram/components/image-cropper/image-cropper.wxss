@@ -1,31 +1,42 @@
-.cropper-container {
+/* image-cropper.wxss */
+.page-container {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  gap: var(--spacing-md, 16px);
+  padding: var(--spacing-md, 16px);
+  background-color: #f5f5f5;
+}
+
+.cropper-container {
+  position: relative;
+  overflow: hidden;
 }
 
 .cropper-canvas {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #f8f8f8;
-  touch-action: none;
-  user-select: none;
+  width: 100%;
+  height: auto;
 }
 
-.mode-switch {
-  margin-top: 10px;
+.control-panel {
   display: flex;
-  gap: 10px;
+  gap: var(--spacing-sm, 8px);
+  flex-wrap: wrap;
 }
 
-.mode-btn {
-  background: #f0f0f0;
-  color: #666;
-  border: 1px solid #ddd;
-}
-
-.mode-btn.active {
-  background: #007aff;
+button {
+  background-color: var(--primary-color, #07c160);
   color: white;
-  border-color: #007aff;
+  border: none;
+  padding: var(--spacing-xs, 4px) var(--spacing-sm, 8px);
+  border-radius: var(--border-radius, 4px);
+}
+
+button[disabled] {
+  background-color: #cccccc;
+  cursor: not-allowed;
+}
+
+.loading, .progress {
+  text-align: center;
+  color: #666;
 }

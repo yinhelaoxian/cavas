@@ -1,6 +1,5 @@
 // crop-behavior.js
 // 微信小程序 Behavior：处理剪裁框的显示、移动、调整大小和保存
-// 独立于 image-behavior.js，确保互不干扰
 module.exports = Behavior({
   // 内部数据
   data: {
@@ -67,8 +66,8 @@ module.exports = Behavior({
       // 保存状态
       ctx2d.save();
 
-      // 绘制半透明遮罩层（调整为更暗，外部透明度略低）
-      ctx2d.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      // 绘制半透明遮罩层（透明度 0.3，减少遮挡）
+      ctx2d.fillStyle = 'rgba(0, 0, 0, 0.3)';
       ctx2d.fillRect(0, 0, canvasWidth, canvasHeight);
 
       // “挖空”剪裁区域（内部完全透明）
@@ -270,64 +269,79 @@ module.exports = Behavior({
     },
 
     /**
-     * 保存剪裁后的图片
-     * @returns {Promise} 返回临时文件路径
+     * 生成剪裁后的图片本地临时文件路径
+     * @returns {Promise} 返回临时文件路径或错误
      */
-    _saveCroppedImage() {
-      const { cropBox, imageObj, imageX, imageY, imageScale, imageRotation } = this.data;
-      
-      if (!imageObj) {
-        wx.showToast({ title: '请先选择图片', icon: 'none' });
-        return Promise.reject(new Error('图片未准备好'));
+    _generateCroppedImage() {
+      const { cropBox, imageObj, imageX, imageY, imageScale, imageRotation, dpr } = this.data;
+      console.log('[剪裁框] 开始生成裁剪图片:', { imageObj, cropBox, imageObjType: typeof imageObj, imageObjWidth: imageObj?.width });
+
+      // 验证所有依赖数据
+      if (!imageObj || !imageObj.width || !imageObj.height) {
+        console.error('[剪裁框] 图片未加载或无效:', { imageObj });
+        return Promise.reject(new Error('[剪裁框] 图片未就绪'));
+      }
+      if (!cropBox || !cropBox.width || !cropBox.height) {
+        console.error('[剪裁框] 剪裁框尺寸无效:', cropBox);
+        return Promise.reject(new Error('[剪裁框] 剪裁框未初始化'));
       }
 
-      return new Promise((resolve, reject) => {
-        // 创建离屏 Canvas
-        const tempCanvas = wx.createOffscreenCanvas({ type: '2d' });
-        tempCanvas.width = cropBox.width;
-        tempCanvas.height = cropBox.height;
-        const tempCtx = tempCanvas.getContext('2d');
+      // 创建离屏Canvas
+      const tempCanvas = wx.createOffscreenCanvas({ type: '2d', width: cropBox.width * dpr, height: cropBox.height * dpr });
+      const tempCtx = tempCanvas.getContext('2d');
+      
+      if (!tempCtx) {
+        console.error('[剪裁框] 临时 Canvas 上下文创建失败');
+        return Promise.reject(new Error('[剪裁框] 临时 Canvas 上下文异常'));
+      }
 
-        // 保存状态
-        tempCtx.save();
+      // 计算图片在剪裁框中的位置和尺寸
+      const rad = (imageRotation * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      
+      // 计算图片中心到剪裁框左上角的向量
+      const dx = cropBox.x + cropBox.width / 2 - imageX;
+      const dy = cropBox.y + cropBox.height / 2 - imageY;
+      
+      // 反向旋转向量，得到在图片坐标系中的位置
+      const imgDx = dx * cos + dy * sin;
+      const imgDy = -dx * sin + dy * cos;
+      
+      // 计算在图片上的实际位置（考虑缩放）
+      const imgX = imageObj.width / 2 + imgDx / imageScale;
+      const imgY = imageObj.height / 2 + imgDy / imageScale;
+      
+      // 计算剪裁区域在图片上的尺寸（考虑缩放）
+      const imgWidth = cropBox.width / imageScale;
+      const imgHeight = cropBox.height / imageScale;
 
-        // 计算图片在剪裁区域中的偏移
-        const offsetX = imageX - cropBox.x;
-        const offsetY = imageY - cropBox.y;
-
-        // 计算图片中心点（相对剪裁区域）
-        const imgCenterX = offsetX + (imageObj.width * imageScale) / 2;
-        const imgCenterY = offsetY + (imageObj.height * imageScale) / 2;
-
-        // 应用变换
-        tempCtx.translate(imgCenterX, imgCenterY);
-        tempCtx.rotate((imageRotation * Math.PI) / 180);
-
-        // 绘制图片
+      try {
+        // 在临时Canvas上绘制剪裁区域
         tempCtx.drawImage(
           imageObj,
-          -(imageObj.width * imageScale) / 2,
-          -(imageObj.height * imageScale) / 2,
-          imageObj.width * imageScale,
-          imageObj.height * imageScale
+          imgX, imgY, imgWidth, imgHeight,
+          0, 0, cropBox.width * dpr, cropBox.height * dpr
         );
+        console.log('[剪裁框] 临时Canvas绘制成功');
+      } catch (e) {
+        console.error('[剪裁框] 临时Canvas绘制失败:', e);
+        return Promise.reject(new Error('[剪裁框] 临时Canvas绘制异常'));
+      }
 
-        tempCtx.restore();
-
-        // 导出图片
+      // 将离屏Canvas转为临时文件
+      return new Promise((resolve, reject) => {
         wx.canvasToTempFilePath({
           canvas: tempCanvas,
           success: (res) => {
-            console.log('[剪裁] 保存成功:', res.tempFilePath);
-            wx.showToast({ title: '保存成功', icon: 'success' });
+            console.log('[剪裁框] 生成临时文件成功:', res.tempFilePath);
             resolve(res.tempFilePath);
           },
           fail: (err) => {
-            console.error('[剪裁] 保存失败:', err);
-            wx.showToast({ title: '保存失败', icon: 'none' });
+            console.error('[剪裁框] 生成临时文件失败:', err);
             reject(err);
           }
-        });
+        }, this);
       });
     }
   }

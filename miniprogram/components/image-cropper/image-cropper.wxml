@@ -1,13 +1,41 @@
 <!-- image-cropper.wxml -->
-<view class="cropper-container">
-  <canvas
-    type="2d"
-    id="cropperCanvas"
-    class="cropper-canvas"
-    style="width: {{width}}px; height: {{height}}px;"
-    catchtouchstart="_onTouchStart"  
-    catchtouchmove="_onTouchMove"
-    catchtouchend="_onTouchEnd"
-    catchtouchcancel="_onTouchEnd"
-  />
-</view>
+<image-cropper
+  id="cropper"
+  width="{{width}}"
+  height="{{height}}"
+  mode="{{mode}}"
+  boundary-padding="{{boundaryPadding}}"
+  image-padding="{{imagePadding}}"
+  max-image-scale="{{maxImageScale}}"
+  min-crop-size="{{minCropSize}}"
+  crop-box-color="{{cropBoxColor}}"
+  mask-opacity="{{maskOpacity}}"
+  bind:ready="onCropperReady"
+  bind:image:loaded="onImageLoaded"
+  bind:error="onCropperError"
+  bind:upload:progress="onUploadProgress"
+  bind:save:success="onSaveSuccess">
+  <view class="page-container">
+    <view class="cropper-container">
+      <canvas
+        type="2d"
+        id="cropperCanvas"
+        class="cropper-canvas"
+        style="width: {{width}}px; height: {{height}}px;"
+        bindtouchstart="_onTouchStart"
+        bindtouchmove="_onTouchMove"
+        bindtouchend="_onTouchEnd"
+        bindtouchcancel="_onTouchEnd" />
+    </view>
+    <view class="control-panel" style="display: {{isLoading ? 'none' : 'flex'}}">
+      <button bindtap="chooseImage" disabled="{{!isReady || isProcessing}}">选择图片</button>
+      <button bindtap="switchMode" data-mode="image" disabled="{{!imageObj || isProcessing}}">编辑</button>
+      <button bindtap="switchMode" data-mode="crop" disabled="{{!imageObj || isProcessing}}">剪裁</button>
+      <button bindtap="rotateImage" disabled="{{!imageObj || isProcessing}}">旋转</button>
+      <button bindtap="resetImage" disabled="{{!imageObj || isProcessing}}">重置</button>
+      <button bindtap="saveCroppedImage" disabled="{{!imageObj || !cropBox.width || isProcessing}}">保存</button>
+    </view>
+    <view wx:if="{{isLoading}}" class="loading">加载中...</view>
+    <view wx:if="{{uploadProgress > 0}}" class="progress">上传进度: {{uploadProgress}}%</view>
+  </view>
+</image-cropper>

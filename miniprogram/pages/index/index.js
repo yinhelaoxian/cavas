@@ -1,97 +1,51 @@
 // index.js
-// 页面逻辑：管理图片剪裁组件的交互
 Page({
   data: {
-    cropperReady: false,  // 组件是否就绪
-    cropperIns: null,     // 组件实例
-    currentMode: 'image'  // 当前模式
+    imageObj: null,
+    cropBox: null,
+    isLoading: false,
+    uploadProgress: 0
   },
 
-  /**
-   * 组件就绪回调
-   * @param {Object} e 事件对象
-   */
+  onLoad() {
+    this.cropper = this.selectComponent('#cropper');
+  },
+
   onCropperReady(e) {
-    if (e.detail.status) {
-      const cropperIns = this.selectComponent('#cropperComp');
-      this.setData({ cropperReady: true, cropperIns });
-      console.log('[页面] 图片剪裁组件已就绪');
-    }
+    console.log('[页面] 图片剪裁组件已就绪');
+    this.setData({ isLoading: false });
   },
 
-  /**
-   * 选择图片
-   */
+  onImageLoaded(e) {
+    console.log('[页面] 图片加载完成', e.detail);
+    this.setData({ imageObj: e.detail.status });
+  },
+
+  onCropperError(e) {
+    console.error('[页面] 组件错误:', e.detail.message);
+    wx.showToast({ title: e.detail.message || '操作失败', icon: 'none' });
+  },
+
+  onUploadProgress(e) {
+    this.setData({ uploadProgress: e.detail.progress });
+  },
+
+  onSaveSuccess(e) {
+    console.log('[页面] 保存成功:', e.detail.fileID);
+  },
+
   chooseImage() {
-    const { cropperIns } = this.data;
-    if (!cropperIns) {
-      wx.showToast({ title: '组件未加载', icon: 'none' });
-      return;
-    }
-    console.log('[页面] 调用选择图片');
-    cropperIns.chooseImage();
+    wx.chooseImage({
+      count: 1,
+      sourceType: ['album', 'camera'],
+      success: (res) => {
+        this.cropper.loadImage(res.tempFilePaths[0]).catch(err => console.error(err));
+      },
+      fail: (err) => wx.showToast({ title: '选择图片失败', icon: 'none' })
+    });
   },
 
-  /**
-   * 旋转图片
-   */
-  rotateImage() {
-    const { cropperIns } = this.data;
-    if (!cropperIns) return;
-    console.log('[页面] 调用旋转图片');
-    cropperIns.rotateImage();
-  },
-
-  /**
-   * 重置图片
-   */
-  resetImage() {
-    const { cropperIns } = this.data;
-    if (!cropperIns) return;
-    console.log('[页面] 调用重置图片');
-    cropperIns.resetImage();
-  },
-
-  /**
-   * 切换到剪裁模式
-   */
-  switchToCrop() {
-    const { cropperIns } = this.data;
-    if (!cropperIns) return;
-    console.log('[页面] 切换到剪裁模式');
-    cropperIns.switchMode('crop');
-    this.setData({ currentMode: 'crop' });
-  },
-
-  /**
-   * 切换到编辑模式
-   */
-  switchToEdit() {
-    const { cropperIns } = this.data;
-    if (!cropperIns) return;
-    console.log('[页面] 切换到编辑模式');
-    cropperIns.switchMode('image');
-    this.setData({ currentMode: 'image' });
-  },
-
-  /**
-   * 保存剪裁图片
-   */
-  async saveImage() {
-    const { cropperIns } = this.data;
-    if (!cropperIns) return;
-    
-    try {
-      console.log('[页面] 调用保存图片');
-      const tempPath = await cropperIns.saveCroppedImage();
-      if (tempPath) {
-        console.log('[页面] 保存的图片路径:', tempPath);
-        wx.showToast({ title: '保存成功', icon: 'success' });
-        // 可以进一步处理保存的图片，如上传或预览
-      }
-    } catch (err) {
-      console.error('[页面] 保存图片失败:', err);
-      wx.showToast({ title: '保存失败', icon: 'none' });
-    }
+  saveCroppedImage() {
+    this.cropper.saveCroppedImage().catch(err => console.error(err));
   }
 });
